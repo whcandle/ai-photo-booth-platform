@@ -1,12 +1,15 @@
 package com.mg.platform.service;
 
 import com.mg.platform.domain.Activity;
+import com.mg.platform.domain.ActivityTemplate;
 import com.mg.platform.domain.Device;
 import com.mg.platform.domain.DeviceActivityAssignment;
 import com.mg.platform.domain.Template;
+import com.mg.platform.domain.TemplateVersion;
 import com.mg.platform.repo.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -37,6 +40,7 @@ public class DeviceService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<TemplateInfo> getActivityTemplates(Long deviceId, Long activityId) {
         // 验证设备是否有权限访问该活动
         Device device = deviceRepository.findById(deviceId)
@@ -50,38 +54,26 @@ public class DeviceService {
             throw new RuntimeException("Device does not have access to this activity");
         }
 
-        // 获取活动的模板
-        List<com.mg.platform.domain.ActivityTemplate> activityTemplates =
+        // 获取活动的模板（已绑定到具体 TemplateVersion）
+        List<ActivityTemplate> activityTemplates =
                 activityTemplateRepository.findByActivityIdAndIsEnabledTrue(activityId);
 
         return activityTemplates.stream()
                 .filter(at -> "ACTIVE".equals(at.getTemplate().getStatus()))
                 .map(at -> {
-                    Template template = at.getTemplate();
-                    String activeVersion = templateVersionRepository.findByTemplateIdAndStatus(
-                            template.getId(), "ACTIVE"
-                    ).stream()
-                            .findFirst()
-                            .map(tv -> tv.getVersion())
-                            .orElse("1.0.0");
+                    // 直接从 ActivityTemplate 获取绑定的 TemplateVersion
+                    TemplateVersion tv = at.getTemplateVersion();
+                    Template t = tv.getTemplate();
 
                     return new TemplateInfo(
-                            template.getId(),
-                            template.getCode(),
-                            template.getName(),
-                            template.getCoverUrl(),
-                            activeVersion,
-                            templateVersionRepository.findByTemplateIdAndStatus(template.getId(), "ACTIVE")
-                                    .stream()
-                                    .findFirst()
-                                    .map(tv -> tv.getPackageUrl())
-                                    .orElse(""),
-                            templateVersionRepository.findByTemplateIdAndStatus(template.getId(), "ACTIVE")
-                                    .stream()
-                                    .findFirst()
-                                    .map(tv -> tv.getChecksum())
-                                    .orElse(null),
-                            true
+                            tv.getId(),                    // templateVersionId
+                            t.getId(),                     // templateId
+                            t.getCode(),                  // templateCode
+                            t.getName(),                  // templateName
+                            t.getCoverUrl(),              // coverUrl
+                            tv.getVersion(),              // versionSemver
+                            tv.getPackageUrl(),           // packageUrl
+                            tv.getChecksum()              // checksum
                     );
                 })
                 .collect(Collectors.toList());
@@ -98,35 +90,36 @@ public class DeviceService {
     }
 
     public static class TemplateInfo {
-        private Long id;
-        private String templateId;
-        private String name;
+        private Long templateVersionId;
+        private Long templateId;
+        private String templateCode;
+        private String templateName;
         private String coverUrl;
-        private String activeVersion;
+        private String versionSemver;
         private String packageUrl;
         private String checksum;
-        private Boolean enabled;
 
-        public TemplateInfo(Long id, String templateId, String name, String coverUrl,
-                           String activeVersion, String packageUrl, String checksum, Boolean enabled) {
-            this.id = id;
+        public TemplateInfo(Long templateVersionId, Long templateId, String templateCode,
+                           String templateName, String coverUrl, String versionSemver,
+                           String packageUrl, String checksum) {
+            this.templateVersionId = templateVersionId;
             this.templateId = templateId;
-            this.name = name;
+            this.templateCode = templateCode;
+            this.templateName = templateName;
             this.coverUrl = coverUrl;
-            this.activeVersion = activeVersion;
+            this.versionSemver = versionSemver;
             this.packageUrl = packageUrl;
             this.checksum = checksum;
-            this.enabled = enabled;
         }
 
         // Getters
-        public Long getId() { return id; }
-        public String getTemplateId() { return templateId; }
-        public String getName() { return name; }
+        public Long getTemplateVersionId() { return templateVersionId; }
+        public Long getTemplateId() { return templateId; }
+        public String getTemplateCode() { return templateCode; }
+        public String getTemplateName() { return templateName; }
         public String getCoverUrl() { return coverUrl; }
-        public String getActiveVersion() { return activeVersion; }
+        public String getVersionSemver() { return versionSemver; }
         public String getPackageUrl() { return packageUrl; }
         public String getChecksum() { return checksum; }
-        public Boolean getEnabled() { return enabled; }
     }
 }
