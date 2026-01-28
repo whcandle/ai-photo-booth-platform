@@ -11,4 +11,5 @@ public interface ActivityTemplateRepository extends JpaRepository<ActivityTempla
     List<ActivityTemplate> findByActivityId(Long activityId);
     List<ActivityTemplate> findByActivityIdAndIsEnabledTrue(Long activityId);
     void deleteByActivityIdAndTemplateId(Long activityId, Long templateId);
+    void deleteByActivityId(Long activityId);
 }

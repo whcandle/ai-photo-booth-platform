@@ -2,7 +2,12 @@ package com.mg.platform.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.mg.platform.common.BaseEntity;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -20,9 +25,20 @@ public class ActivityTemplate extends BaseEntity {
     @JoinColumn(name = "template_id", nullable = false)
     private Template template;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "template_version_id", nullable = false)
+    private TemplateVersion templateVersion;
+
     @Column(name = "sort_order", nullable = false)
     private Integer sortOrder = 0;
 
     @Column(name = "is_enabled", nullable = false)
     private Boolean isEnabled = true;
+
+    public void setTemplateVersion(TemplateVersion templateVersion) {
+        this.templateVersion = templateVersion;
+        if (templateVersion != null) {
+            this.template = templateVersion.getTemplate();
+        }
+    }
 }

@@ -36,6 +36,7 @@ public class MerchantController {
         }
     }
 
+    // 旧接口：兼容传入 templateIds，内部会找到每个模板的最新版本
     @PostMapping("/activities/{activityId}/templates")
     public ApiResponse<String> bindTemplates(
             @PathVariable Long activityId,
@@ -44,6 +45,20 @@ public class MerchantController {
         try {
             merchantService.bindTemplatesToActivity(activityId, request.getTemplateIds());
             return ApiResponse.success("Templates bound successfully");
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    // 新接口：按模板版本绑定
+    @PostMapping("/activities/{activityId}/template-versions")
+    public ApiResponse<String> bindTemplateVersions(
+            @PathVariable Long activityId,
+            @RequestBody BindTemplateVersionsRequest request
+    ) {
+        try {
+            merchantService.bindTemplateVersionsToActivity(activityId, request.getTemplateVersionIds());
+            return ApiResponse.success("Template versions bound successfully");
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
@@ -90,6 +105,11 @@ public class MerchantController {
     @Data
     static class BindTemplatesRequest {
         private List<Long> templateIds;
+    }
+
+    @Data
+    static class BindTemplateVersionsRequest {
+        private List<Long> templateVersionIds;
     }
 
     @Data

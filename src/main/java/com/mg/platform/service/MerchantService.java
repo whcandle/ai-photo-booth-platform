@@ -1,7 +1,16 @@
 package com.mg.platform.service;
 
-import com.mg.platform.domain.*;
-import com.mg.platform.repo.*;
+import com.mg.platform.domain.Activity;
+import com.mg.platform.domain.ActivityTemplate;
+import com.mg.platform.domain.Device;
+import com.mg.platform.domain.DeviceActivityAssignment;
+import com.mg.platform.domain.Merchant;
+import com.mg.platform.domain.TemplateVersion;
+import com.mg.platform.repo.ActivityRepository;
+import com.mg.platform.repo.ActivityTemplateRepository;
+import com.mg.platform.repo.DeviceActivityAssignmentRepository;
+import com.mg.platform.repo.DeviceRepository;
+import com.mg.platform.repo.TemplateVersionRepository;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,7 +26,7 @@ public class MerchantService {
     private final ActivityTemplateRepository activityTemplateRepository;
     private final DeviceRepository deviceRepository;
     private final DeviceActivityAssignmentRepository assignmentRepository;
-    private final TemplateRepository templateRepository;
+    private final TemplateVersionRepository templateVersionRepository;
 
     public List<Activity> getMerchantActivities(Long merchantId) {
         return activityRepository.findByMerchantId(merchantId);
@@ -39,27 +48,52 @@ public class MerchantService {
     }
 
     @Transactional
-    public void bindTemplatesToActivity(Long activityId, List<Long> templateIds) {
+    public void bindTemplateVersionsToActivity(Long activityId, List<Long> templateVersionIds) {
         Activity activity = activityRepository.findById(activityId)
                 .orElseThrow(() -> new RuntimeException("Activity not found"));
 
         // 删除现有绑定
-        List<ActivityTemplate> existing = activityTemplateRepository.findByActivityId(activityId);
-        activityTemplateRepository.deleteAll(existing);
+        activityTemplateRepository.deleteByActivityId(activityId);
 
         // 添加新绑定
-        for (int i = 0; i < templateIds.size(); i++) {
-            Long templateId = templateIds.get(i);
-            Template template = templateRepository.findById(templateId)
-                    .orElseThrow(() -> new RuntimeException("Template not found: " + templateId));
+        for (int i = 0; i < templateVersionIds.size(); i++) {
+            Long templateVersionId = templateVersionIds.get(i);
+            TemplateVersion templateVersion = templateVersionRepository.findById(templateVersionId)
+                    .orElseThrow(() -> new RuntimeException("TemplateVersion not found: " + templateVersionId));
 
             ActivityTemplate at = new ActivityTemplate();
             at.setActivity(activity);
-            at.setTemplate(template);
+            at.setTemplateVersion(templateVersion); // 会自动同步冗余 template 字段
             at.setSortOrder(i);
             at.setIsEnabled(true);
             activityTemplateRepository.save(at);
         }
+    }
+
+    /**
+     * 根据模板ID列表，找到每个模板的最新版本ID，然后绑定到活动
+     * 用于兼容旧接口：/activities/{id}/templates
+     */
+    @Transactional
+    public void bindTemplatesToActivity(Long activityId, List<Long> templateIds) {
+        // 将 templateIds 转换为对应的最新 templateVersionIds
+        List<Long> templateVersionIds = templateIds.stream()
+                .map(templateId -> {
+                    // 找到该模板下状态为 ACTIVE 的版本，按 id 降序取第一个（最新）
+                    List<TemplateVersion> versions = templateVersionRepository.findByTemplateIdAndStatus(templateId, "ACTIVE");
+                    if (versions.isEmpty()) {
+                        throw new RuntimeException("No active template version found for template: " + templateId);
+                    }
+                    // 按 id 降序排序，取最新的
+                    return versions.stream()
+                            .max((v1, v2) -> Long.compare(v1.getId(), v2.getId()))
+                            .map(TemplateVersion::getId)
+                            .orElseThrow(() -> new RuntimeException("No template version found for template: " + templateId));
+                })
+                .collect(Collectors.toList());
+
+        // 调用新方法
+        bindTemplateVersionsToActivity(activityId, templateVersionIds);
     }
 
     @Transactional
@@ -71,6 +105,7 @@ public class MerchantService {
         List<DeviceActivityAssignment> existing = assignmentRepository.findByActivityId(activityId);
         for (DeviceActivityAssignment assignment : existing) {
             assignment.setStatus("INACTIVE");
+            assignment.setDeactivatedAt(java.time.LocalDateTime.now());
             assignmentRepository.save(assignment);
         }
 
@@ -83,6 +118,7 @@ public class MerchantService {
             assignment.setDevice(device);
             assignment.setActivity(activity);
             assignment.setStatus("ACTIVE");
+            assignment.setActivatedAt(java.time.LocalDateTime.now());
             assignmentRepository.save(assignment);
         }
     }
