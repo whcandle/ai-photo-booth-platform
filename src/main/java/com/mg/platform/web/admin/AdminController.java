@@ -36,6 +36,16 @@ public class AdminController {
         }
     }
 
+    @GetMapping("/templates/{templateId}/versions")
+    public ApiResponse<List<TemplateVersion>> listTemplateVersions(@PathVariable Long templateId) {
+        try {
+            List<TemplateVersion> versions = adminService.listTemplateVersions(templateId);
+            return ApiResponse.success(versions);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PostMapping("/templates/{templateId}/versions")
     public ApiResponse<TemplateVersion> createVersion(
             @PathVariable Long templateId,

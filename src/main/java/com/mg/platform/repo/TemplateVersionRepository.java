@@ -11,4 +11,5 @@ import java.util.Optional;
 public interface TemplateVersionRepository extends JpaRepository<TemplateVersion, Long> {
     List<TemplateVersion> findByTemplateIdAndStatus(Long templateId, String status);
     Optional<TemplateVersion> findByTemplateIdAndVersion(Long templateId, String version);
+    List<TemplateVersion> findByTemplateIdOrderByIdDesc(Long templateId);
 }

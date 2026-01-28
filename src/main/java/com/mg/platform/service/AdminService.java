@@ -46,6 +46,15 @@ public class AdminService {
         return templateVersionRepository.save(version);
     }
 
+    public List<TemplateVersion> listTemplateVersions(Long templateId) {
+        // 验证模板是否存在
+        templateRepository.findById(templateId)
+                .orElseThrow(() -> new RuntimeException("Template not found"));
+        
+        // 返回该模板的所有版本，按 id 降序排列（最新的在前）
+        return templateVersionRepository.findByTemplateIdOrderByIdDesc(templateId);
+    }
+
     @Data
     public static class CreateTemplateRequest {
         private String code;
