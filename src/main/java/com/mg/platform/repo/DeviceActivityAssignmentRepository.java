@@ -11,4 +11,6 @@ public interface DeviceActivityAssignmentRepository extends JpaRepository<Device
     List<DeviceActivityAssignment> findByDeviceId(Long deviceId);
     List<DeviceActivityAssignment> findByDeviceIdAndStatus(Long deviceId, String status);
     List<DeviceActivityAssignment> findByActivityId(Long activityId);
+    List<DeviceActivityAssignment> findByActivityIdAndStatus(Long activityId, String status);
+    java.util.Optional<DeviceActivityAssignment> findByActivityIdAndDeviceId(Long activityId, Long deviceId);
 }

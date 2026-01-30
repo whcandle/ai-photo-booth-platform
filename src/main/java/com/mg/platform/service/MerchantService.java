@@ -35,6 +35,12 @@ public class MerchantService {
         return activityRepository.findByMerchantId(merchantId);
     }
 
+    @Transactional(readOnly = true)
+    public Activity getActivityById(Long activityId) {
+        return activityRepository.findById(activityId)
+                .orElseThrow(() -> new RuntimeException("Activity not found: " + activityId));
+    }
+
     public Activity createActivity(Long merchantId, CreateActivityRequest request) {
         Merchant merchant = new Merchant();
         merchant.setId(merchantId);
@@ -131,31 +137,83 @@ public class MerchantService {
         bindTemplateVersionsToActivity(activityId, templateVersionIds);
     }
 
+    /**
+     * 同步绑定设备到活动（diff模式）：
+     * 前端传入当前"完整选中"的 deviceIds 列表，
+     * 后端按差异进行删除（软删除）/ 新增 / 恢复，避免重复记录。
+     */
     @Transactional
     public void bindDevicesToActivity(Long activityId, List<Long> deviceIds) {
         Activity activity = activityRepository.findById(activityId)
                 .orElseThrow(() -> new RuntimeException("Activity not found"));
 
-        // 先取消该活动的所有设备绑定
-        List<DeviceActivityAssignment> existing = assignmentRepository.findByActivityId(activityId);
-        for (DeviceActivityAssignment assignment : existing) {
-            assignment.setStatus("INACTIVE");
-            assignment.setDeactivatedAt(java.time.LocalDateTime.now());
-            assignmentRepository.save(assignment);
+        // 空列表视为"全部取消绑定"
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            List<DeviceActivityAssignment> existing = assignmentRepository.findByActivityIdAndStatus(activityId, "ACTIVE");
+            for (DeviceActivityAssignment assignment : existing) {
+                assignment.setStatus("INACTIVE");
+                assignment.setDeactivatedAt(java.time.LocalDateTime.now());
+                assignmentRepository.save(assignment);
+            }
+            return;
         }
 
-        // 添加新绑定
-        for (Long deviceId : deviceIds) {
+        // 去重并保持前端顺序
+        Set<Long> desiredIds = new LinkedHashSet<>(deviceIds);
+
+        // 1) 加载现有 ACTIVE 绑定
+        List<DeviceActivityAssignment> existing = assignmentRepository.findByActivityIdAndStatus(activityId, "ACTIVE");
+
+        // 2) 取消不再需要的绑定（软删除）
+        for (DeviceActivityAssignment assignment : existing) {
+            Long deviceId = assignment.getDevice().getId();
+            if (!desiredIds.contains(deviceId)) {
+                assignment.setStatus("INACTIVE");
+                assignment.setDeactivatedAt(java.time.LocalDateTime.now());
+                assignmentRepository.save(assignment);
+            }
+        }
+
+        // 3) 新增或恢复需要的绑定
+        for (Long deviceId : desiredIds) {
             Device device = deviceRepository.findById(deviceId)
                     .orElseThrow(() -> new RuntimeException("Device not found: " + deviceId));
 
-            DeviceActivityAssignment assignment = new DeviceActivityAssignment();
-            assignment.setDevice(device);
-            assignment.setActivity(activity);
-            assignment.setStatus("ACTIVE");
-            assignment.setActivatedAt(java.time.LocalDateTime.now());
+            // 查找是否已存在绑定（可能是 INACTIVE 状态）
+            java.util.Optional<DeviceActivityAssignment> existingAssignment = 
+                    assignmentRepository.findByActivityIdAndDeviceId(activityId, deviceId);
+
+            DeviceActivityAssignment assignment;
+            if (existingAssignment.isPresent()) {
+                // 恢复已存在的绑定
+                assignment = existingAssignment.get();
+                assignment.setStatus("ACTIVE");
+                assignment.setActivatedAt(java.time.LocalDateTime.now());
+                assignment.setDeactivatedAt(null);
+            } else {
+                // 创建新绑定
+                assignment = new DeviceActivityAssignment();
+                assignment.setDevice(device);
+                assignment.setActivity(activity);
+                assignment.setStatus("ACTIVE");
+                assignment.setActivatedAt(java.time.LocalDateTime.now());
+            }
             assignmentRepository.save(assignment);
         }
+    }
+
+    /**
+     * 查询某个活动当前已绑定的设备 ID 列表（仅 ACTIVE 状态）
+     */
+    @Transactional(readOnly = true)
+    public List<Long> getActivityDeviceIds(Long activityId) {
+        activityRepository.findById(activityId)
+                .orElseThrow(() -> new RuntimeException("Activity not found"));
+
+        return assignmentRepository.findByActivityIdAndStatus(activityId, "ACTIVE")
+                .stream()
+                .map(assignment -> assignment.getDevice().getId())
+                .collect(Collectors.toList());
     }
 
     public List<Device> getMerchantDevices(Long merchantId) {

@@ -26,6 +26,16 @@ public class MerchantController {
         }
     }
 
+    @GetMapping("/activities/{activityId}")
+    public ApiResponse<Activity> getActivity(@PathVariable Long activityId) {
+        try {
+            Activity activity = merchantService.getActivityById(activityId);
+            return ApiResponse.success(activity);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PostMapping("/activities")
     public ApiResponse<Activity> createActivity(@RequestBody CreateActivityRequest request) {
         try {
@@ -98,6 +108,16 @@ public class MerchantController {
         try {
             merchantService.bindDevicesToActivity(activityId, request.getDeviceIds());
             return ApiResponse.success("Devices bound successfully");
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/activities/{activityId}/devices")
+    public ApiResponse<List<Long>> getActivityDevices(@PathVariable Long activityId) {
+        try {
+            List<Long> deviceIds = merchantService.getActivityDeviceIds(activityId);
+            return ApiResponse.success(deviceIds);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
