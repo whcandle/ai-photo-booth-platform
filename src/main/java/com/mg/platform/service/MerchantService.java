@@ -5,6 +5,7 @@ import com.mg.platform.domain.ActivityTemplate;
 import com.mg.platform.domain.Device;
 import com.mg.platform.domain.DeviceActivityAssignment;
 import com.mg.platform.domain.Merchant;
+import com.mg.platform.domain.Template;
 import com.mg.platform.domain.TemplateVersion;
 import com.mg.platform.repo.ActivityRepository;
 import com.mg.platform.repo.ActivityTemplateRepository;
@@ -16,7 +17,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -47,25 +50,57 @@ public class MerchantService {
         return activityRepository.save(activity);
     }
 
+    /**
+     * 同步绑定模板版本：
+     * 前端传入当前“完整选中”的 templateVersionIds 列表，
+     * 后端按差异进行删除 / 新增 / 更新 sort_order，避免唯一键冲突。
+     */
     @Transactional
     public void bindTemplateVersionsToActivity(Long activityId, List<Long> templateVersionIds) {
         Activity activity = activityRepository.findById(activityId)
                 .orElseThrow(() -> new RuntimeException("Activity not found"));
 
-        // 删除现有绑定
-        activityTemplateRepository.deleteByActivityId(activityId);
+        // 空视为“全部取消绑定”
+        if (templateVersionIds == null || templateVersionIds.isEmpty()) {
+            activityTemplateRepository.deleteByActivityId(activityId);
+            return;
+        }
 
-        // 添加新绑定
-        for (int i = 0; i < templateVersionIds.size(); i++) {
-            Long templateVersionId = templateVersionIds.get(i);
-            TemplateVersion templateVersion = templateVersionRepository.findById(templateVersionId)
-                    .orElseThrow(() -> new RuntimeException("TemplateVersion not found: " + templateVersionId));
+        // 去重并保持前端顺序
+        Set<Long> desiredIds = new LinkedHashSet<>(templateVersionIds);
 
-            ActivityTemplate at = new ActivityTemplate();
-            at.setActivity(activity);
-            at.setTemplateVersion(templateVersion); // 会自动同步冗余 template 字段
-            at.setSortOrder(i);
-            at.setIsEnabled(true);
+        // 1) 加载现有绑定
+        List<ActivityTemplate> existing = activityTemplateRepository.findByActivityId(activityId);
+
+        // 2) 删除不再需要的绑定
+        for (ActivityTemplate at : existing) {
+            Long vid = at.getTemplateVersion().getId();
+            if (!desiredIds.contains(vid)) {
+                activityTemplateRepository.delete(at);
+            }
+        }
+
+        // 3) 新增或更新需要保留的绑定，并设置排序
+        int sortOrder = 0;
+        for (Long versionId : desiredIds) {
+            ActivityTemplate at = activityTemplateRepository
+                    .findByActivityIdAndTemplateVersionId(activityId, versionId)
+                    .orElse(null);
+
+            if (at == null) {
+                TemplateVersion templateVersion = templateVersionRepository.findById(versionId)
+                        .orElseThrow(() -> new RuntimeException("TemplateVersion not found: " + versionId));
+
+                at = new ActivityTemplate();
+                at.setActivity(activity);
+                at.setTemplateVersion(templateVersion); // 会自动同步冗余 template 字段
+                at.setIsEnabled(true);
+            } else {
+                // 已存在的记录，确保仍为启用状态
+                at.setIsEnabled(true);
+            }
+
+            at.setSortOrder(sortOrder++);
             activityTemplateRepository.save(at);
         }
     }
@@ -140,6 +175,59 @@ public class MerchantService {
         return deviceRepository.save(device);
     }
 
+    /**
+     * 重置某个活动的模板绑定（删除所有 ActivityTemplate 记录）
+     */
+    @Transactional
+    public void resetActivityTemplateBindings(Long activityId) {
+        // 确认活动存在，避免静默删除错误 ID
+        activityRepository.findById(activityId)
+                .orElseThrow(() -> new RuntimeException("Activity not found"));
+
+        activityTemplateRepository.deleteByActivityId(activityId);
+    }
+
+    /**
+     * 查询某个活动当前已绑定的模板版本 ID 列表（仅 is_enabled = true）
+     */
+    @Transactional(readOnly = true)
+    public List<Long> getActivityTemplateVersionIds(Long activityId) {
+        activityRepository.findById(activityId)
+                .orElseThrow(() -> new RuntimeException("Activity not found"));
+
+        return activityTemplateRepository.findByActivityIdAndIsEnabledTrue(activityId)
+                .stream()
+                .map(at -> at.getTemplateVersion().getId())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 获取所有可用的模板版本列表（仅 ACTIVE 状态）
+     * 返回扁平列表，包含模板和版本信息
+     */
+    @Transactional(readOnly = true)
+    public List<TemplateVersionInfo> getAvailableTemplateVersions() {
+        List<TemplateVersion> versions = templateVersionRepository.findAll().stream()
+                .filter(tv -> "ACTIVE".equals(tv.getStatus()))
+                .filter(tv -> tv.getTemplate() != null && "ACTIVE".equals(tv.getTemplate().getStatus()))
+                .collect(Collectors.toList());
+
+        return versions.stream()
+                .map(tv -> {
+                    Template t = tv.getTemplate();
+                    TemplateVersionInfo info = new TemplateVersionInfo();
+                    info.setTemplateVersionId(tv.getId());
+                    info.setVersionSemver(tv.getVersion());
+                    info.setPackageUrl(tv.getPackageUrl());
+                    info.setChecksum(tv.getChecksum());
+                    info.setTemplateId(t.getId());
+                    info.setTemplateName(t.getName());
+                    info.setCoverUrl(t.getCoverUrl());
+                    return info;
+                })
+                .collect(Collectors.toList());
+    }
+
     @Data
     public static class CreateActivityRequest {
         private String name;
@@ -152,5 +240,16 @@ public class MerchantService {
     public static class CreateDeviceRequest {
         private String deviceCode;
         private String name;
+    }
+
+    @Data
+    public static class TemplateVersionInfo {
+        private Long templateVersionId;
+        private String versionSemver;
+        private String packageUrl;
+        private String checksum;
+        private Long templateId;
+        private String templateName;
+        private String coverUrl;
     }
 }

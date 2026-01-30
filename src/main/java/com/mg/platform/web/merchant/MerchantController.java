@@ -64,6 +64,32 @@ public class MerchantController {
         }
     }
 
+    /**
+     * 查询某个活动当前已绑定的模板版本 ID 列表（用于前端回显）
+     */
+    @GetMapping("/activities/{activityId}/template-versions")
+    public ApiResponse<List<Long>> getActivityTemplateVersions(@PathVariable Long activityId) {
+        try {
+            List<Long> ids = merchantService.getActivityTemplateVersionIds(activityId);
+            return ApiResponse.success(ids);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    /**
+     * 重置某个活动的模板绑定（删除所有已绑定的模板版本）
+     */
+    @PostMapping("/activities/{activityId}/template-versions/reset")
+    public ApiResponse<String> resetTemplateVersions(@PathVariable Long activityId) {
+        try {
+            merchantService.resetActivityTemplateBindings(activityId);
+            return ApiResponse.success("Activity template bindings reset successfully");
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PostMapping("/activities/{activityId}/devices")
     public ApiResponse<String> bindDevices(
             @PathVariable Long activityId,
@@ -92,6 +118,16 @@ public class MerchantController {
         try {
             Device device = merchantService.createDevice(request.getMerchantId(), request);
             return ApiResponse.success(device);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/template-versions")
+    public ApiResponse<List<MerchantService.TemplateVersionInfo>> getTemplateVersions() {
+        try {
+            List<MerchantService.TemplateVersionInfo> versions = merchantService.getAvailableTemplateVersions();
+            return ApiResponse.success(versions);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
