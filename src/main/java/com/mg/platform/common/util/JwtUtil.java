@@ -81,4 +81,53 @@ public class JwtUtil {
         final String tokenEmail = extractEmail(token);
         return (tokenEmail.equals(email) && !isTokenExpired(token));
     }
+
+    /**
+     * Generate JWT token for device authentication
+     * @param deviceId Device ID
+     * @param merchantId Merchant ID
+     * @return JWT token string
+     */
+    public String generateDeviceToken(Long deviceId, Long merchantId) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("deviceId", deviceId);
+        claims.put("merchantId", merchantId);
+        claims.put("type", "device");
+        String subject = "device:" + deviceId;
+        return createToken(claims, subject);
+    }
+
+    /**
+     * Extract device ID from device JWT token
+     * @param token JWT token
+     * @return Device ID
+     */
+    public Long extractDeviceId(String token) {
+        return extractClaim(token, claims -> claims.get("deviceId", Long.class));
+    }
+
+    /**
+     * Extract device type from JWT token
+     * @param token JWT token
+     * @return Device type (should be "device")
+     */
+    public String extractDeviceType(String token) {
+        return extractClaim(token, claims -> claims.get("type", String.class));
+    }
+
+    /**
+     * Validate device token
+     * @param token JWT token
+     * @param deviceId Expected device ID
+     * @return true if valid
+     */
+    public Boolean validateDeviceToken(String token, Long deviceId) {
+        try {
+            final Long tokenDeviceId = extractDeviceId(token);
+            final String type = extractDeviceType(token);
+            return ("device".equals(type) && tokenDeviceId != null && tokenDeviceId.equals(deviceId) && !isTokenExpired(token));
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }

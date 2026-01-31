@@ -40,7 +40,8 @@ public class SecurityConfig {
                                 "/api/v1/auth/**",
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
-                                "/v3/api-docs/**"
+                                "/v3/api-docs/**",
+                                "/packages/**"  // 允许访问模板包文件（static/packages/ 下的文件通过 /packages/ 访问）
                         ).permitAll()
                         // 设备API暂时开放，后续加设备token验证或设备专用token
                         .requestMatchers("/api/v1/device/**").permitAll()

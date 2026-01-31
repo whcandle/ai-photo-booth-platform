@@ -21,6 +21,9 @@ public class Device extends BaseEntity {
     @Column(name = "device_code", nullable = false, length = 64)
     private String deviceCode;
 
+    @Column(length = 255)
+    private String secret;
+
     @Column(length = 128)
     private String name;
 

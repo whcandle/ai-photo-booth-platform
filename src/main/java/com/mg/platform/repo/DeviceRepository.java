@@ -16,4 +16,7 @@ public interface DeviceRepository extends JpaRepository<Device, Long> {
     
     @Query("SELECT d FROM Device d JOIN FETCH d.merchant WHERE d.merchant.id = :merchantId")
     List<Device> findByMerchantId(@Param("merchantId") Long merchantId);
+
+    @Query("SELECT d FROM Device d JOIN FETCH d.merchant WHERE d.deviceCode = :deviceCode")
+    Optional<Device> findByDeviceCode(@Param("deviceCode") String deviceCode);
 }
