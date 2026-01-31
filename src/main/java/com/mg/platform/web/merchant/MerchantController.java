@@ -1,6 +1,7 @@
 package com.mg.platform.web.merchant;
 
 import com.mg.platform.common.dto.ApiResponse;
+import com.mg.platform.common.dto.PageResponse;
 import com.mg.platform.domain.Activity;
 import com.mg.platform.domain.Device;
 import com.mg.platform.service.MerchantService;
@@ -16,11 +17,30 @@ import java.util.List;
 public class MerchantController {
     private final MerchantService merchantService;
 
+    /**
+     * 分页查询活动列表
+     * @param merchantId 商户ID（必填）
+     * @param q 搜索关键词（可选，对 name/description 模糊查询）
+     * @param status 状态过滤（可选，ALL/ACTIVE/INACTIVE，默认 ALL）
+     * @param page 页码（默认 0）
+     * @param size 每页大小（默认 20）
+     * @param sort 排序字段（默认 updatedAt）
+     * @param direction 排序方向（默认 desc）
+     */
     @GetMapping("/activities")
-    public ApiResponse<List<Activity>> getActivities(@RequestParam Long merchantId) {
+    public ApiResponse<PageResponse<MerchantService.ActivityListItemDto>> getActivities(
+            @RequestParam Long merchantId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false, defaultValue = "ALL") String status,
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "20") int size,
+            @RequestParam(required = false, defaultValue = "updatedAt") String sort,
+            @RequestParam(required = false, defaultValue = "desc") String direction
+    ) {
         try {
-            List<Activity> activities = merchantService.getMerchantActivities(merchantId);
-            return ApiResponse.success(activities);
+            PageResponse<MerchantService.ActivityListItemDto> result = merchantService.getMerchantActivitiesPage(
+                    merchantId, q, status, page, size, sort, direction);
+            return ApiResponse.success(result);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
@@ -76,12 +96,30 @@ public class MerchantController {
 
     /**
      * 查询某个活动当前已绑定的模板版本 ID 列表（用于前端回显）
+     * 保留此接口以兼容前端现有代码
      */
-    @GetMapping("/activities/{activityId}/template-versions")
-    public ApiResponse<List<Long>> getActivityTemplateVersions(@PathVariable Long activityId) {
+    @GetMapping("/activities/{activityId}/template-versions/ids")
+    public ApiResponse<List<Long>> getActivityTemplateVersionIds(@PathVariable Long activityId) {
         try {
             List<Long> ids = merchantService.getActivityTemplateVersionIds(activityId);
             return ApiResponse.success(ids);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    /**
+     * 查询某个活动已绑定的模板版本详细信息列表（按 sortOrder 排序）
+     * 返回包含 templateVersionId, versionSemver, templateId, templateName, coverUrl, sortOrder
+     */
+    @GetMapping("/activities/{activityId}/template-versions")
+    public ApiResponse<List<MerchantService.ActivityBoundTemplateVersionDto>> getActivityBoundTemplateVersions(
+            @PathVariable Long activityId
+    ) {
+        try {
+            List<MerchantService.ActivityBoundTemplateVersionDto> result = 
+                    merchantService.getActivityBoundTemplateVersions(activityId);
+            return ApiResponse.success(result);
         } catch (Exception e) {
             return ApiResponse.error(e.getMessage());
         }
@@ -154,6 +192,7 @@ public class MerchantController {
     }
 
     @Data
+    @lombok.EqualsAndHashCode(callSuper = false)
     static class CreateActivityRequest extends MerchantService.CreateActivityRequest {
         private Long merchantId;
     }
@@ -174,6 +213,7 @@ public class MerchantController {
     }
 
     @Data
+    @lombok.EqualsAndHashCode(callSuper = false)
     static class CreateDeviceRequest extends MerchantService.CreateDeviceRequest {
         private Long merchantId;
     }

@@ -1,5 +1,6 @@
 package com.mg.platform.service;
 
+import com.mg.platform.common.dto.PageResponse;
 import com.mg.platform.domain.Activity;
 import com.mg.platform.domain.ActivityTemplate;
 import com.mg.platform.domain.Device;
@@ -14,9 +15,17 @@ import com.mg.platform.repo.DeviceRepository;
 import com.mg.platform.repo.TemplateVersionRepository;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import jakarta.persistence.criteria.Predicate;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -33,6 +42,87 @@ public class MerchantService {
 
     public List<Activity> getMerchantActivities(Long merchantId) {
         return activityRepository.findByMerchantId(merchantId);
+    }
+
+    /**
+     * 分页查询活动列表
+     * @param merchantId 商户ID（必填）
+     * @param q 搜索关键词（可选，对 name/description 模糊查询）
+     * @param status 状态过滤（可选，ALL/ACTIVE/INACTIVE，默认 ALL）
+     * @param page 页码（默认 0）
+     * @param size 每页大小（默认 20）
+     * @param sort 排序字段（默认 updatedAt）
+     * @param direction 排序方向（默认 desc）
+     * @return 分页结果
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<ActivityListItemDto> getMerchantActivitiesPage(
+            Long merchantId,
+            String q,
+            String status,
+            int page,
+            int size,
+            String sort,
+            String direction
+    ) {
+        // 参数默认值处理
+        int finalPage = page < 0 ? 0 : page;
+        int finalSize = size <= 0 ? 20 : (size > 100 ? 100 : size);
+        String finalSort = StringUtils.hasText(sort) ? sort : "updatedAt";
+        String finalDirection = StringUtils.hasText(direction) ? direction : "desc";
+        String finalStatus = StringUtils.hasText(status) ? status : "ALL";
+        String finalQ = q; // 保持引用不变
+
+        // 构建排序
+        Sort.Direction sortDirection = "asc".equalsIgnoreCase(finalDirection) 
+            ? Sort.Direction.ASC 
+            : Sort.Direction.DESC;
+        Sort sortObj = Sort.by(sortDirection, finalSort);
+        Pageable pageable = PageRequest.of(finalPage, finalSize, sortObj);
+
+        // 构建查询条件
+        Specification<Activity> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+
+            // merchantId 必填条件
+            predicates.add(cb.equal(root.get("merchant").get("id"), merchantId));
+
+            // 搜索关键词（name 或 description 模糊匹配）
+            if (StringUtils.hasText(finalQ)) {
+                String likePattern = "%" + finalQ + "%";
+                Predicate namePredicate = cb.like(root.get("name"), likePattern);
+                Predicate descPredicate = cb.like(root.get("description"), likePattern);
+                predicates.add(cb.or(namePredicate, descPredicate));
+            }
+
+            // 状态过滤
+            if (!"ALL".equalsIgnoreCase(finalStatus)) {
+                predicates.add(cb.equal(root.get("status"), finalStatus));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        // 执行分页查询
+        Page<Activity> pageResult = activityRepository.findAll(spec, pageable);
+
+        // 转换为 DTO
+        List<ActivityListItemDto> items = pageResult.getContent().stream()
+                .map(activity -> {
+                    ActivityListItemDto dto = new ActivityListItemDto();
+                    dto.setId(activity.getId());
+                    dto.setName(activity.getName());
+                    dto.setDescription(activity.getDescription());
+                    dto.setStatus(activity.getStatus());
+                    dto.setStartAt(activity.getStartAt());
+                    dto.setEndAt(activity.getEndAt());
+                    dto.setCreatedAt(activity.getCreatedAt());
+                    dto.setUpdatedAt(activity.getUpdatedAt());
+                    return dto;
+                })
+                .collect(Collectors.toList());
+
+        return PageResponse.of(items, finalPage, finalSize, pageResult.getTotalElements());
     }
 
     @Transactional(readOnly = true)
@@ -57,55 +147,37 @@ public class MerchantService {
     }
 
     /**
-     * 同步绑定模板版本：
-     * 前端传入当前“完整选中”的 templateVersionIds 列表，
-     * 后端按差异进行删除 / 新增 / 更新 sort_order，避免唯一键冲突。
+     * 全量覆盖绑定模板版本：
+     * 前端传入当前"完整选中"的 templateVersionIds 列表，
+     * 后端采用全量覆盖语义：先删除所有旧绑定，再按顺序插入新绑定。
+     * 这样支持：取消绑定（提交更少的ids）、增加绑定（提交更多的ids）、不会重复插入。
      */
     @Transactional
     public void bindTemplateVersionsToActivity(Long activityId, List<Long> templateVersionIds) {
         Activity activity = activityRepository.findById(activityId)
                 .orElseThrow(() -> new RuntimeException("Activity not found"));
 
-        // 空视为“全部取消绑定”
+        // 1) 先删除该活动的所有旧绑定（全量覆盖语义）
+        activityTemplateRepository.deleteByActivityId(activityId);
+
+        // 2) 如果传入空列表，表示全部取消绑定，直接返回
         if (templateVersionIds == null || templateVersionIds.isEmpty()) {
-            activityTemplateRepository.deleteByActivityId(activityId);
             return;
         }
 
-        // 去重并保持前端顺序
+        // 3) 去重并保持前端顺序
         Set<Long> desiredIds = new LinkedHashSet<>(templateVersionIds);
 
-        // 1) 加载现有绑定
-        List<ActivityTemplate> existing = activityTemplateRepository.findByActivityId(activityId);
-
-        // 2) 删除不再需要的绑定
-        for (ActivityTemplate at : existing) {
-            Long vid = at.getTemplateVersion().getId();
-            if (!desiredIds.contains(vid)) {
-                activityTemplateRepository.delete(at);
-            }
-        }
-
-        // 3) 新增或更新需要保留的绑定，并设置排序
+        // 4) 按顺序批量插入新绑定
         int sortOrder = 0;
         for (Long versionId : desiredIds) {
-            ActivityTemplate at = activityTemplateRepository
-                    .findByActivityIdAndTemplateVersionId(activityId, versionId)
-                    .orElse(null);
+            TemplateVersion templateVersion = templateVersionRepository.findById(versionId)
+                    .orElseThrow(() -> new RuntimeException("TemplateVersion not found: " + versionId));
 
-            if (at == null) {
-                TemplateVersion templateVersion = templateVersionRepository.findById(versionId)
-                        .orElseThrow(() -> new RuntimeException("TemplateVersion not found: " + versionId));
-
-                at = new ActivityTemplate();
-                at.setActivity(activity);
-                at.setTemplateVersion(templateVersion); // 会自动同步冗余 template 字段
-                at.setIsEnabled(true);
-            } else {
-                // 已存在的记录，确保仍为启用状态
-                at.setIsEnabled(true);
-            }
-
+            ActivityTemplate at = new ActivityTemplate();
+            at.setActivity(activity);
+            at.setTemplateVersion(templateVersion); // 自动同步 template 字段
+            at.setIsEnabled(true);
             at.setSortOrder(sortOrder++);
             activityTemplateRepository.save(at);
         }
@@ -260,6 +332,34 @@ public class MerchantService {
     }
 
     /**
+     * 查询某个活动已绑定的模板版本详细信息列表（按 sortOrder 排序）
+     * 返回包含 templateVersionId, versionSemver, templateId, templateName, coverUrl, sortOrder
+     */
+    @Transactional(readOnly = true)
+    public List<ActivityBoundTemplateVersionDto> getActivityBoundTemplateVersions(Long activityId) {
+        activityRepository.findById(activityId)
+                .orElseThrow(() -> new RuntimeException("Activity not found"));
+
+        // 使用 JOIN FETCH 查询，避免 N+1 问题，并已按 sortOrder 排序
+        return activityTemplateRepository.findByActivityIdAndIsEnabledTrueWithDetails(activityId)
+                .stream()
+                .map(at -> {
+                    TemplateVersion tv = at.getTemplateVersion();
+                    Template t = tv.getTemplate();
+                    
+                    ActivityBoundTemplateVersionDto dto = new ActivityBoundTemplateVersionDto();
+                    dto.setTemplateVersionId(tv.getId());
+                    dto.setVersionSemver(tv.getVersion());
+                    dto.setTemplateId(t.getId());
+                    dto.setTemplateName(t.getName());
+                    dto.setCoverUrl(t.getCoverUrl());
+                    dto.setSortOrder(at.getSortOrder() != null ? at.getSortOrder() : 0);
+                    return dto;
+                })
+                .collect(Collectors.toList());
+    }
+
+    /**
      * 获取所有可用的模板版本列表（仅 ACTIVE 状态）
      * 返回扁平列表，包含模板和版本信息
      */
@@ -309,5 +409,27 @@ public class MerchantService {
         private Long templateId;
         private String templateName;
         private String coverUrl;
+    }
+
+    @Data
+    public static class ActivityListItemDto {
+        private Long id;
+        private String name;
+        private String description;
+        private String status;
+        private java.time.LocalDateTime startAt;
+        private java.time.LocalDateTime endAt;
+        private java.time.LocalDateTime createdAt;
+        private java.time.LocalDateTime updatedAt;
+    }
+
+    @Data
+    public static class ActivityBoundTemplateVersionDto {
+        private Long templateVersionId;
+        private String versionSemver;
+        private Long templateId;
+        private String templateName;
+        private String coverUrl;
+        private Integer sortOrder;
     }
 }
