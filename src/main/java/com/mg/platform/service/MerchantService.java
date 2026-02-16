@@ -168,18 +168,20 @@ public class MerchantService {
         // 3) 去重并保持前端顺序
         Set<Long> desiredIds = new LinkedHashSet<>(templateVersionIds);
 
-        // 4) 按顺序批量插入新绑定
+        // 4) 按顺序批量插入新绑定（使用 INSERT ... ON DUPLICATE KEY UPDATE 避免重复键错误）
         int sortOrder = 0;
         for (Long versionId : desiredIds) {
             TemplateVersion templateVersion = templateVersionRepository.findById(versionId)
                     .orElseThrow(() -> new RuntimeException("TemplateVersion not found: " + versionId));
 
-            ActivityTemplate at = new ActivityTemplate();
-            at.setActivity(activity);
-            at.setTemplateVersion(templateVersion); // 自动同步 template 字段
-            at.setIsEnabled(true);
-            at.setSortOrder(sortOrder++);
-            activityTemplateRepository.save(at);
+            // 使用 INSERT ... ON DUPLICATE KEY UPDATE 语法，如果记录已存在则更新，不存在则插入
+            activityTemplateRepository.insertOrUpdateActivityTemplate(
+                    activityId,
+                    templateVersion.getTemplate().getId(),
+                    versionId,
+                    sortOrder++,
+                    true
+            );
         }
     }
 

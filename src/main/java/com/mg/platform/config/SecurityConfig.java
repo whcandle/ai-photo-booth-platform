@@ -45,6 +45,8 @@ public class SecurityConfig {
                         ).permitAll()
                         // 设备API暂时开放，后续加设备token验证或设备专用token
                         .requestMatchers("/api/v1/device/**").permitAll()
+                        // AI Resolve API暂时开放
+                        .requestMatchers("/api/v1/ai/**").permitAll()
                         // RBAC：管理端仅 ADMIN，商家端 ADMIN + MERCHANT_OWNER
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/merchant/**").hasAnyRole("ADMIN", "MERCHANT_OWNER")

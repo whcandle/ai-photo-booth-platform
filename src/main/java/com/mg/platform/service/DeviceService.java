@@ -1,5 +1,6 @@
 package com.mg.platform.service;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.mg.platform.common.util.JwtUtil;
 import com.mg.platform.domain.Activity;
 import com.mg.platform.domain.ActivityTemplate;
@@ -15,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -75,14 +77,47 @@ public class DeviceService {
                     TemplateVersion tv = at.getTemplateVersion();
                     Template t = tv.getTemplate();
 
+                    // 验证 Template.code 非空（设备端输出必需）
+                    String templateCode = t.getCode();
+                    if (templateCode == null || templateCode.isBlank()) {
+                        throw new RuntimeException(
+                                String.format("Template.code is required for device output. Template ID: %d", t.getId()));
+                    }
+
+                    // 获取 updatedAt：优先级 tv.updatedAt > tv.createdAt > at.updatedAt > at.createdAt > t.updatedAt > t.createdAt
+                    LocalDateTime updatedAt = null;
+                    if (tv.getUpdatedAt() != null) {
+                        updatedAt = tv.getUpdatedAt();
+                    } else if (tv.getCreatedAt() != null) {
+                        updatedAt = tv.getCreatedAt();
+                    } else if (at.getUpdatedAt() != null) {
+                        updatedAt = at.getUpdatedAt();
+                    } else if (at.getCreatedAt() != null) {
+                        updatedAt = at.getCreatedAt();
+                    } else if (t.getUpdatedAt() != null) {
+                        updatedAt = t.getUpdatedAt();
+                    } else if (t.getCreatedAt() != null) {
+                        updatedAt = t.getCreatedAt();
+                    }
+
+                    // 转换为 ISO8601 格式（UTC）
+                    String updatedAtStr = null;
+                    if (updatedAt != null) {
+                        ZonedDateTime zonedDateTime = updatedAt.atZone(ZoneOffset.UTC);
+                        updatedAtStr = zonedDateTime.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+                    }
+
                     return new TemplateInfo(
-                            t.getId(),                     // templateId
-                            t.getName(),                   // name
-                            t.getCoverUrl(),               // coverUrl
-                            tv.getVersion(),               // version
-                            tv.getPackageUrl(),            // downloadUrl
-                            tv.getChecksum(),              // checksum
-                            at.getIsEnabled()              // enabled (from activity_templates.is_enabled)
+                            t.getId(),                     // templateId (deprecated, kept for compatibility)
+                            templateCode,                 // templateCode (new: from Template.code)
+                            t.getName(),                  // name
+                            t.getCoverUrl(),              // coverUrl
+                            tv.getVersion(),              // version (deprecated, kept for compatibility)
+                            tv.getVersion(),              // versionSemver (new: from TemplateVersion.version)
+                            tv.getPackageUrl(),           // downloadUrl
+                            tv.getChecksum(),             // checksumSha256 (renamed from checksum)
+                            at.getIsEnabled(),            // enabled (from activity_templates.is_enabled)
+                            updatedAtStr                  // updatedAt (ISO8601 UTC)
                     );
                 })
                 .collect(Collectors.toList());
@@ -137,34 +172,63 @@ public class DeviceService {
     }
 
     public static class TemplateInfo {
-        private Long templateId;
+        // New fields (stable API)
+        private String templateCode;      // From Template.code
+        private String versionSemver;      // From TemplateVersion.version (semver format)
+        @JsonProperty("checksumSha256")
+        private String checksumSha256;     // From TemplateVersion.checksum (renamed for clarity)
+        
+        // Deprecated fields (kept for backward compatibility, will be removed in future)
+        @Deprecated
+        private Long templateId;           // Deprecated: use templateCode instead
+        @Deprecated
+        private String version;            // Deprecated: use versionSemver instead
+        
+        // Other fields
         private String name;
         private String coverUrl;
-        private String version;
         private String downloadUrl;
-        private String checksum;
         private Boolean enabled;
+        private String updatedAt;          // ISO8601 format (UTC)
 
-        public TemplateInfo(Long templateId, String name, String coverUrl,
-                           String version, String downloadUrl, String checksum,
-                           Boolean enabled) {
+        public TemplateInfo(Long templateId, String templateCode, String name, String coverUrl,
+                           String version, String versionSemver, String downloadUrl, String checksumSha256,
+                           Boolean enabled, String updatedAt) {
+            // Deprecated fields
             this.templateId = templateId;
+            this.version = version;
+            
+            // New fields
+            this.templateCode = templateCode;
+            this.versionSemver = versionSemver;
+            this.checksumSha256 = checksumSha256;
+            
+            // Other fields
             this.name = name;
             this.coverUrl = coverUrl;
-            this.version = version;
             this.downloadUrl = downloadUrl;
-            this.checksum = checksum;
             this.enabled = enabled;
+            this.updatedAt = updatedAt;
         }
 
-        // Getters
+        // Getters for new fields
+        public String getTemplateCode() { return templateCode; }
+        public String getVersionSemver() { return versionSemver; }
+        @JsonProperty("checksumSha256")
+        public String getChecksumSha256() { return checksumSha256; }
+        
+        // Getters for deprecated fields
+        @Deprecated
         public Long getTemplateId() { return templateId; }
+        @Deprecated
+        public String getVersion() { return version; }
+        
+        // Getters for other fields
         public String getName() { return name; }
         public String getCoverUrl() { return coverUrl; }
-        public String getVersion() { return version; }
         public String getDownloadUrl() { return downloadUrl; }
-        public String getChecksum() { return checksum; }
         public Boolean getEnabled() { return enabled; }
+        public String getUpdatedAt() { return updatedAt; }
     }
 
     public static class HandshakeResponse {

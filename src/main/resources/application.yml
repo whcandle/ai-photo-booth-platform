@@ -28,7 +28,7 @@ spring:
     encoding: UTF-8
 
 server:
-  port: 8080
+  port: 8089
   servlet:
     context-path: /
 
@@ -43,3 +43,7 @@ logging:
 jwt:
   secret: your-secret-key-change-this-in-production-min-256-bits
   expiration: 86400000 # 24 hours in milliseconds
+
+crypto:
+  api-key:
+    secret: default-secret-key-16 # 16 bytes for AES-128, change in production
